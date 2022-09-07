@@ -99,11 +99,13 @@ class _CPcapReader_help(object):
             self._pkts[i].dump()
 
 
-    def get_type(self,tcp,udp):
+    def get_type(self,tcp,udp,sctp=None):
         if tcp and udp==None:
             return("tcp");
         if udp and tcp==None:
             return("udp");
+        if sctp and tcp==None and udp==None:
+            return("sctp");
         return("other");
 
     def analyze(self):
@@ -160,14 +162,19 @@ class _CPcapReader_help(object):
 
                 tcp = None
                 udp = None
+                sctp = None
 
                 if  isinstance(l4, dpkt.udp.UDP):
                     udp = l4;
 
                 if isinstance(l4, dpkt.tcp.TCP):
                     tcp = l4
+                
+                # TODO: attend to this after adding sctp support
+                # if isinstance(l4, dpkt.sctp.SCTP):
+                #     sctp = l4
 
-                typel4 = self.get_type(tcp,udp);
+                typel4 = self.get_type(tcp,udp,sctp);
     
                 if typel4 == "other":
                      self.fail('Packet #%s in pcap has is not TCP or UDP' % index)
@@ -180,6 +187,9 @@ class _CPcapReader_help(object):
     
                 if tcp and udp:
                     self.fail('Packet #%s in pcap has both TCP and UDP' % index)
+                
+                if sctp and (tcp or udp):
+                    self.fail('Packet #%s in pcap has both SCTP and TCP or UDP' % index)
     
                 elif tcp:
                     l4 = tcp
@@ -218,6 +228,11 @@ class _CPcapReader_help(object):
                      if l4_type not in (None, 'UDP'):
                         self.fail('PCAP contains both UDP and %s. This is not supported currently.' % l4_type)
                      l4_type = 'UDP'
+                elif sctp:
+                    l4 = sctp
+                    if l4_type not in (None, 'SCTP'):
+                        self.fail('PCAP contains both SCTP and %s. This is not supported currently.' % l4_type)
+                    l4_type = 'SCTP'
                 else:
                     self.fail('Packet #%s in pcap is not TCP or UDP.' % index)
     

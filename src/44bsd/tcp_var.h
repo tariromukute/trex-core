@@ -609,6 +609,73 @@ public:
 
 };
 
+class CSctpFlow : public CFlowBase {
+
+public:
+    void Create(CPerProfileCtx *pctx, bool client, uint16_t tg_id=0);
+    void Delete();
+
+    static CSctpFlow * cast_from_hash_obj(flow_hash_ent_t *p){
+        return((CSctpFlow *)CFlowBase::cast_from_hash_obj(p));
+    }
+
+    void init();
+
+    void send_pkt(CMbufBuffer * buf);
+
+    void disconnect();
+
+    void set_keepalive(uint64_t msec, bool rx_mode);
+
+    void on_tick();
+
+    bool is_can_closed(){
+        return(m_closed);
+    }
+
+    void on_rx_packet(struct rte_mbuf *m,
+                      UDPHeader *udp,
+                      int offset_l7,
+                      int total_l7_len);
+
+
+public:
+    void set_c_udp_info(const CAstfPerTemplateRW *rw_db, uint16_t temp_id){
+    }
+
+    void set_s_udp_info(const CAstfDbRO * ro_db, CTcpTuneables *tune){
+    }
+
+private:
+
+    rte_mbuf_t   *    alloc_and_build(CMbufBuffer *      buf);
+
+    void update_checksum_and_lenght(CFlowTemplate *ftp,
+                                    rte_mbuf_t * m,
+                                    uint16_t     udp_pyld_bytes,
+                                    char *pkt);
+
+    inline rte_mbuf_t   * pktmbuf_alloc_small(void){
+        return (tcp_pktmbuf_alloc_small(m_mbuf_socket));
+    }
+
+    inline rte_mbuf_t   * pktmbuf_alloc(uint16_t size){
+        return (tcp_pktmbuf_alloc(m_mbuf_socket,size));
+    }
+
+    void keepalive_timer_start(bool init);
+
+public:
+    CHTimerObj        m_keep_alive_timer; /* 32 bytes */ 
+    bool              m_keepalive_rx_mode; /* keepalive by rx only */
+    uint32_t          m_keepalive_ticks;
+    uint8_t           m_mbuf_socket;    /* mbuf socket */
+    uint8_t           m_keepalive;      /* 1- no-alive 0- alive */
+    uint32_t          m_remain_ticks;
+    bool              m_closed;
+
+};
+
 /*****************************************************/
 
 class CServerTemplateInfo;
@@ -1125,6 +1192,14 @@ public:
     }
 
     void handle_udp_timer(CUdpFlow * flow){
+        if (flow->is_can_closed()) {
+          m_ft.handle_close(this,flow,true);
+        } else if (!flow->m_pctx->is_active() && flow->m_pctx->get_nc()) {
+          m_ft.terminate_flow(this,flow,true);
+        }
+    }
+
+    void handle_sctp_timer(CSctpFlow * flow){
         if (flow->is_can_closed()) {
           m_ft.handle_close(this,flow,true);
         } else if (!flow->m_pctx->is_active() && flow->m_pctx->get_nc()) {

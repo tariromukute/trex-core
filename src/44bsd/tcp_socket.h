@@ -635,6 +635,15 @@ public:
         return ((m_flags &taUDP_FLOW)?true:false);
     }
 
+    // TODO: update when adding SCTP support
+    void set_sctp_flow(){
+            m_flags|=taUDP_FLOW;
+    }
+
+    bool is_sctp_flow(){
+        return ((m_flags &taUDP_FLOW)?true:false);
+    }
+
     /* inside the Rx */
     void set_interrupt(bool enable){
         if (enable){
@@ -791,6 +800,16 @@ public:
 
     CUdpFlow *   get_udp_flow(){
         return((CUdpFlow *)m_flow);
+    }
+
+    void set_sctp_flow_ctx(CPerProfileCtx *  pctx,
+                          CSctpFlow *          flow){
+        m_pctx = pctx;
+        m_flow = (CTcpFlow*)flow;
+    }
+
+    CSctpFlow *   get_sctp_flow(){
+        return((CSctpFlow *)m_flow);
     }
 
     void set_l7_check(bool enable) { m_l7check_enable = enable; }

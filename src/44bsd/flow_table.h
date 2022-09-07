@@ -165,6 +165,7 @@ typedef CCloseHash<flow_key_t> flow_hash_t;
 class CTcpPerThreadCtx ;
 class CTcpFlow;
 class CUdpFlow;
+class CSctpFlow;
 class CFlowBase;
 class CEmulAppApi;
 class CEmulAppProgram;
@@ -280,6 +281,10 @@ public:
          m_udp_api = udp_api;
     }
 
+    void set_sctp_api(CEmulAppApi    *   stcp_api){
+         m_sctp_api = stcp_api;
+    }
+
 
     bool is_client_side(){
         return (m_client_side);
@@ -310,11 +315,27 @@ public:
                               UDPHeader    * lpUDP,
                               CFlowKeyFullTuple &ftuple);
 
+      void process_sctp_packet(CTcpPerThreadCtx * ctx,
+                              CSctpFlow *  flow,
+                              struct rte_mbuf * mbuf,
+                              UDPHeader    * lpUDP,
+                              CFlowKeyFullTuple &ftuple);
+
       bool ignore_packet(CTcpPerThreadCtx * ctx,
                          struct rte_mbuf * mbuf,
                          CFlowKeyFullTuple &ftuple);
 
       bool rx_handle_packet_udp_no_flow(CTcpPerThreadCtx * ctx,
+                                        struct rte_mbuf * mbuf,
+                                        flow_hash_ent_t * lpflow,
+                                        CSimplePacketParser & parser,
+                                        CFlowKeyTuple & tuple,
+                                        CFlowKeyFullTuple & ftuple,
+                                        uint32_t  hash,
+                                        tvpid_t port_id
+                                        );
+
+      bool rx_handle_packet_sctp_no_flow(CTcpPerThreadCtx * ctx,
                                         struct rte_mbuf * mbuf,
                                         flow_hash_ent_t * lpflow,
                                         CSimplePacketParser & parser,
@@ -438,6 +459,18 @@ public:
                               uint16_t tg_id=0,
                               uint16_t template_id=0);
 
+    CSctpFlow * alloc_flow_sctp(CPerProfileCtx * pctx,
+                              uint32_t src,
+                              uint32_t dst,
+                              uint16_t src_port,
+                              uint16_t dst_port,
+                              uint16_t vlan,
+                              bool is_ipv6,
+                              void *tun_handle,
+                              bool client,
+                              uint16_t tg_id=0,
+                              uint16_t template_id=0);
+
 
     void free_flow(CFlowBase * flow);
 
@@ -478,6 +511,7 @@ private:
 
     CEmulAppApi    *   m_tcp_api;
     CEmulAppApi    *   m_udp_api;
+    CEmulAppApi    *   m_sctp_api;
 
     CTcpRxOffload*  m_tcp_lro;
 };

@@ -86,6 +86,7 @@ bool CFlowTable::Create(uint32_t size,
     reset_stats();
     m_tcp_api=(CEmulAppApi    *)0;
     m_udp_api=(CEmulAppApi    *)0;
+    m_sctp_api=(CEmulAppApi    *)0;
 
     m_service_status        = SERVICE_OFF;
     m_service_filtered_mask = 0;
@@ -149,12 +150,13 @@ void CFlowTable::parse_packet(struct rte_mbuf * mbuf,
     uint32_t pkt_len=0;
 
     if ( (parser.m_protocol != IPHeader::Protocol::TCP) && 
-         (parser.m_protocol != IPHeader::Protocol::UDP) ){
+         (parser.m_protocol != IPHeader::Protocol::UDP) &&
+         (parser.m_protocol != IPHeader::Protocol::SCTP) ) {
         FT_INC_SCNT(m_err_no_tcp_udp);
         action=tREDIRECT_RX_CORE;
         return;
     }
-    /* TCP/UDP, only supported right now */
+    /* TCP/UDP, only supported right now. Addind support for STCP */
     
     /* Service filtered check, default is SERVICE OFF */
     if ( m_service_status != SERVICE_OFF ) {
@@ -175,6 +177,7 @@ void CFlowTable::parse_packet(struct rte_mbuf * mbuf,
         lpf->m_ipv4      =true;
         lpf->m_l3_offset = (uintptr_t)parser.m_ipv4 - (uintptr_t)p;
         IPHeader *   ipv4= parser.m_ipv4;
+        // TODO: added to this when adding SCTP support
         TCPUDPHeaderBase    * lpL4 = (TCPUDPHeaderBase *)parser.m_l4;
         if ( m_client_side ) {
             tuple.set_src_ip(ipv4->getDestIp());
@@ -230,6 +233,9 @@ void CFlowTable::parse_packet(struct rte_mbuf * mbuf,
 
     uint8_t l4_header_len=0;
     if ( lpf->m_proto == IPHeader::Protocol::UDP){
+        l4_header_len=UDP_HEADER_LEN;
+    } else if (lpf->m_proto == IPHeader::Protocol::UDP) {
+        // TODO: update this when adding SCTP support 
         l4_header_len=UDP_HEADER_LEN;
     }else{
         TCPHeader    * lpTcp = (TCPHeader *)parser.m_l4;
@@ -526,6 +532,31 @@ CUdpFlow * CFlowTable::alloc_flow_udp(CPerProfileCtx * pctx,
     return(flow);
 }
 
+CSctpFlow * CFlowTable::alloc_flow_sctp(CPerProfileCtx * pctx,
+                                  uint32_t src,
+                                  uint32_t dst,
+                                  uint16_t src_port,
+                                  uint16_t dst_port,
+                                  uint16_t vlan,
+                                  bool is_ipv6,
+                                  void *tunnel_ctx,
+                                  bool client,
+                                  uint16_t tg_id,
+                                  uint16_t template_id){
+    CSctpFlow * flow = new (std::nothrow) CSctpFlow();
+    if (flow == 0 ) {
+        FT_INC_SCNT(m_err_no_memory);
+        return((CSctpFlow *)0);
+    }
+    flow->Create(pctx, client, tg_id);
+    flow->m_c_template_idx = template_id;
+    // TODO: update this when we support SCTP
+    flow->m_template.set_tuple(src,dst,src_port,dst_port,vlan,IPHeader::Protocol::UDP,tunnel_ctx,is_ipv6);
+    flow->init();
+    flow->m_pctx->m_flow_cnt++;
+    return(flow);
+}
+
 CTcpFlow * CFlowTable::alloc_flow(CPerProfileCtx * pctx,
                                   uint32_t src,
                                   uint32_t dst,
@@ -611,6 +642,24 @@ void CFlowTable::process_udp_packet(CTcpPerThreadCtx * ctx,
                                     CUdpFlow *  flow,
                                     struct rte_mbuf * mbuf,
                                     UDPHeader    * lpUDP,
+                                    CFlowKeyFullTuple &ftuple){
+
+    flow->on_rx_packet(mbuf,
+                       lpUDP,
+                       ftuple.m_l7_offset,
+                       ftuple.m_l7_total_len);
+
+    flow->check_defer_function();
+
+    if (flow->is_can_closed()) {
+        handle_close(ctx,flow,true);
+    }
+}
+
+void CFlowTable::process_sctp_packet(CTcpPerThreadCtx * ctx,
+                                    CSctpFlow *  flow,
+                                    struct rte_mbuf * mbuf,
+                                    UDPHeader    * lpUDP, // TODO: update this when we support SCTP
                                     CFlowKeyFullTuple &ftuple){
 
     flow->on_rx_packet(mbuf,
@@ -774,6 +823,128 @@ bool CFlowTable::rx_handle_packet_udp_no_flow(CTcpPerThreadCtx * ctx,
     return(true);
 }
 
+bool CFlowTable::rx_handle_packet_sctp_no_flow(CTcpPerThreadCtx * ctx,
+                                              struct rte_mbuf * mbuf,
+                                              flow_hash_ent_t * lpflow,
+                                              CSimplePacketParser & parser,
+                                              CFlowKeyTuple & tuple,
+                                              CFlowKeyFullTuple & ftuple,
+                                              uint32_t  hash,
+                                              tvpid_t port_id
+                                              ){
+    CSctpFlow * flow;
+
+    /* first in flow */
+    UDPHeader    * lpUDP = (UDPHeader *)parser.m_l4; // TODO: update when SCTP is supported
+
+    /* not found in flowtable , we are generating the flows*/
+    if ( m_client_side ){
+        FT_INC_SCNT(m_err_client_pkt_without_flow);
+        rte_pktmbuf_free(mbuf);
+        return(false);
+    }
+
+    /* Patch */
+    uint32_t dest_ip;
+    bool is_ipv6=false;
+    if (parser.m_ipv4){
+        IPHeader *  ipv4 = (IPHeader *)parser.m_ipv4;    
+        dest_ip=ipv4->getDestIp();
+    }else{
+        IPv6Header *   ipv6= parser.m_ipv6;
+        dest_ip =ipv6->getDestIpv6LSB();
+        is_ipv6=true;
+    }
+
+    uint8_t *pkt = rte_pktmbuf_mtod(mbuf, uint8_t*);
+
+    /* TBD Parser need to be fixed */
+    uint16_t vlan=0;
+    if (parser.m_vlan_offset) {
+        VLANHeader * lpVlan=(VLANHeader *)(pkt+14);
+        vlan = lpVlan->getVlanTag();
+    }
+
+    uint16_t dst_port = lpUDP->getDestPort();
+
+    if (!ctx->is_any_profile()) {
+        rte_pktmbuf_free(mbuf);
+        FT_INC_SCNT(m_err_no_template);
+        return(false);
+    }
+
+    CServerTemplateInfo *temp = ctx->get_template_info_by_port(dst_port,false);
+    if (!temp) {
+        uint8_t *l7_data = pkt + ftuple.m_l7_offset;
+        uint16_t l7_len = ftuple.m_l7_total_len;
+        temp = ctx->get_template_info(dst_port,false,dest_ip, l7_data,l7_len);
+    }
+    CPerProfileCtx *pctx = temp ? temp->get_profile_ctx(): nullptr;
+    CTcpServerInfo *server_info = temp ? temp->get_server_info(): nullptr;
+
+    if (!server_info || !pctx->is_open_flow_allowed()){
+        rte_pktmbuf_free(mbuf);
+        FT_INC_SCNT(m_err_no_template);
+        return(false);
+    }
+
+    CAstfDbRO *tcp_data_ro = pctx->m_template_ro;
+    uint16_t c_template_idx = server_info->get_temp_idx();
+    uint16_t tg_id = tcp_data_ro->get_template_tg_id(c_template_idx);
+
+    if ( ctx->is_open_flow_enabled()==false ){
+        rte_pktmbuf_free(mbuf);
+        FT_INC_SCNT(m_err_s_nf_throttled);
+        return(false);
+    }
+
+    CEmulAppProgram *server_prog = server_info->get_prog();
+    //CTcpTuneables *s_tune = server_info->get_tuneables();
+
+    flow = ctx->m_ft.alloc_flow_sctp(pctx, dest_ip, tuple.get_src_ip(),
+                                    dst_port, tuple.get_sport(),
+                                    vlan, is_ipv6, NULL, false, tg_id,
+                                    c_template_idx);
+
+
+
+    if (flow == 0 ) {
+        rte_pktmbuf_free(mbuf);
+        return(false);
+    }
+
+    //set the tunnel contexts to the server side in gtpu-loopback mode
+    flow->set_tunnel_ctx();
+
+    flow->m_template.server_update_mac(pkt, pctx, port_id);
+    if (is_ipv6) {
+        /* learn the ipv6 headers */
+        flow->m_template.learn_ipv6_headers_from_network(parser.m_ipv6);
+    }
+
+    flow->m_c_template_idx = c_template_idx;
+
+    flow_key_t key=tuple.get_flow_key();
+    /* add to flow-table */
+    flow->m_hash.key = key;
+
+    /* no need to check, we just checked */
+    m_ft.insert_nc(&flow->m_hash,hash);
+
+    CEmulApp * app =&flow->m_app;
+
+    app->set_program(server_prog);
+    app->set_bh_api(m_sctp_api);
+    app->set_sctp_flow_ctx(flow->m_pctx,flow);
+    app->set_sctp_flow();
+    //flow->set_s_udp_info(tcp_data_ro, s_tune);  NOT needed for now 
+
+
+    app->start(true); /* start the application */
+
+    process_sctp_packet(ctx,flow,mbuf,lpUDP,ftuple);
+    return(true);
+}
 
 bool CFlowTable::rx_handle_packet_tcp_no_flow(CTcpPerThreadCtx * ctx,
                                               struct rte_mbuf * mbuf,

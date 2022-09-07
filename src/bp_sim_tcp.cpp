@@ -787,6 +787,7 @@ void CFlowGenListPerThread::Create_tcp_ctx(void) {
 
     m_s_tcp->m_ft.set_tcp_api(&m_tcp_bh_api_impl_c);
     m_s_tcp->m_ft.set_udp_api(&m_udp_bh_api_impl_c);
+    m_s_tcp->m_ft.set_sctp_api(&m_udp_bh_api_impl_c);
 }
 
 void CFlowGenListPerThread::load_tcp_profile(profile_id_t profile_id, bool is_first, CAstfDB* astf_db) {

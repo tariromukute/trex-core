@@ -612,6 +612,23 @@ static void ctx_timer(void *userdata,
         app->on_tick();
         ctx->handle_udp_timer(app->get_udp_flow());
         break;
+    case ttSCTP_FLOW:
+        {
+        CSctpFlow * sctp_flow;
+        UNSAFE_CONTAINER_OF_PUSH;
+        sctp_flow=my_unsafe_container_of(tmr,CSctpFlow,m_keep_alive_timer);
+        UNSAFE_CONTAINER_OF_POP;
+        sctp_flow->on_tick();
+        ctx->handle_sctp_timer(sctp_flow);
+        }
+        break;
+    case ttSCTP_APP:
+        UNSAFE_CONTAINER_OF_PUSH;
+        app=my_unsafe_container_app(tmr,CEmulApp,timer_offset);
+        UNSAFE_CONTAINER_OF_POP;
+        app->on_tick();
+        ctx->handle_sctp_timer(app->get_sctp_flow());
+        break;
     case ttGen:
         {
             CAstfTimerObj * tobj=(CAstfTimerObj *)tmr;
@@ -1552,6 +1569,7 @@ void CFlowTemplate::learn_ipv6_headers_from_network(IPv6Header * net_ipv6){
         if (is_tcp()) {
             m_l4_pseudo_checksum = rte_ipv6_phdr_cksum((struct rte_ipv6_hdr *)ipv6,(RTE_MBUF_F_TX_IPV6 | RTE_MBUF_F_TX_TCP_CKSUM));
         }else{
+            // TODO: update after adding SCTP support
             m_l4_pseudo_checksum = rte_ipv6_phdr_cksum((struct rte_ipv6_hdr *)ipv6,(RTE_MBUF_F_TX_IPV6 | RTE_MBUF_F_TX_UDP_CKSUM));
         }
     }else{
@@ -1691,6 +1709,7 @@ void CFlowTemplate::build_template_tcp(CPerProfileCtx * pctx){
            if (m_is_ipv6) {
                m_l4_pseudo_checksum = rte_ipv6_phdr_cksum((struct rte_ipv6_hdr *)(p+m_offset_ip),(RTE_MBUF_F_TX_IPV6 | RTE_MBUF_F_TX_TCP_CKSUM));
            }else{
+                // TODO: update after adding SCTP support
                m_l4_pseudo_checksum = rte_ipv4_phdr_cksum((struct rte_ipv4_hdr *)(p+m_offset_ip),(RTE_MBUF_F_TX_IPV4 |RTE_MBUF_F_TX_IP_CKSUM|RTE_MBUF_F_TX_TCP_CKSUM));
            }
        }else{

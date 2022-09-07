@@ -29,7 +29,9 @@ typedef enum { ttTCP_FLOW =0x17,
                ttUDP_FLOW =0x21,
                ttUDP_APP  =0x22,
                ttGen      =0x23,
-               ttGenFunctor  =0x24, 
+               ttGenFunctor  =0x24,
+               ttSCTP_FLOW =0x25,
+               ttSCTP_APP  =0x26, 
 } ctx_time_types_t;
 
 
